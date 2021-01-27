@@ -42,8 +42,11 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     for column in categories:
         # select the last character of the string
         categories[column] = categories[column].str[-1]
-        # convert column from string to binary
+        # convert column from string to numeric
         categories[column] = categories[column].astype(int)
+
+    # convert category values to binary
+    categories = (categories > 0).astype(int)
 
     # concatenate the original dataframe with the new categories
     df = df.drop('categories', axis=1)

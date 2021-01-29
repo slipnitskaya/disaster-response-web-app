@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 
 import sklearn.metrics as skmet
-import sklearn.ensemble as skens
 import sklearn.pipeline as skpipe
 import sklearn.multioutput as sklmc
 import sklearn.preprocessing as skprep
@@ -17,6 +16,7 @@ import sklearn.model_selection as skms
 import sklearn.feature_extraction.text as skfet
 
 from sklearn.utils import check_X_y
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.utils.validation import has_fit_parameter
 from sklearn.utils.multiclass import check_classification_targets
 from sklearn.base import BaseEstimator, TransformerMixin, is_classifier
@@ -35,7 +35,7 @@ STOP_WORDS = [w for w in stopwords.words('english')]
 RANDOM_SEED = 42
 
 
-def load_data(path_to_database: str, table_name: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray, List]:
+def load_data(path_to_database: str, table_name: Optional[str] = None) -> Tuple[pd.DataFrame, pd.DataFrame, List]:
     """
     Load the data from the SQLite database and split it into feature and target variables.
     """
@@ -50,7 +50,7 @@ def load_data(path_to_database: str, table_name: Optional[str] = None) -> Tuple[
 
     class_names = y.columns.tolist()
 
-    return X.values, y.values, class_names
+    return X, y, class_names
 
 
 def tokenize(text):
@@ -182,7 +182,7 @@ def build_model():
             ('noun', skpipe.Pipeline([('feat', RatioNounExtractor()), ('norm', skprep.StandardScaler())]))
         ])),
         ('clf', MultiOutputClassifier(
-            skens.RandomForestClassifier(random_state=RANDOM_SEED, class_weight='balanced_subsample', n_jobs=-1)
+            RandomForestClassifier(random_state=RANDOM_SEED, class_weight='balanced_subsample', n_jobs=-1)
         ))
     ])
 
@@ -235,6 +235,7 @@ def main():
 
     print(f'Loading data...\n\tDatabase: {path_to_database}')
     X, y, class_names = load_data(path_to_database)
+    X, y = X.values, y.values
 
     X_train, X_test, y_train, y_test = skms.train_test_split(X, y, test_size=0.2, random_state=RANDOM_SEED)
 

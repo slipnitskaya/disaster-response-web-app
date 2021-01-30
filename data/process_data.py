@@ -74,9 +74,9 @@ def parse_arguments() -> Tuple[str, str, str]:
     Parse command line arguments.
     """
     parser = argparse.ArgumentParser(description='Disaster Response / Data Processing')
-    parser.add_argument('--path-to-messages', type=str, default='disaster_messages.csv')
-    parser.add_argument('--path-to-categories', type=str, default='disaster_categories.csv')
-    parser.add_argument('--path-to-database', type=str, default='disaster_responses.db')
+    parser.add_argument('-m', '--path-to-messages', type=str)
+    parser.add_argument('-c', '--path-to-categories', type=str)
+    parser.add_argument('-d', '--path-to-database', type=str)
     args = parser.parse_args()
 
     return args.path_to_messages, args.path_to_categories, args.path_to_database

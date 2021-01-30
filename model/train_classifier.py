@@ -1,38 +1,50 @@
 import os
 import re
 import pickle
-import string
 import logging
 import argparse
+
+import nltk
 
 import numpy as np
 import pandas as pd
 
-import sklearn.metrics as skmet
 import sklearn.pipeline as skpipe
-import sklearn.multioutput as sklmc
+import sklearn.decomposition as skdec
 import sklearn.preprocessing as skprep
 import sklearn.model_selection as skms
 import sklearn.feature_extraction.text as skfet
 
-from sklearn.utils import check_X_y
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.utils.validation import has_fit_parameter
-from sklearn.utils.multiclass import check_classification_targets
-from sklearn.base import BaseEstimator, TransformerMixin, is_classifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import classification_report
+from sklearn.base import BaseEstimator, TransformerMixin
 
 from nltk import pos_tag
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 
-from joblib import Parallel, delayed
 from sqlalchemy import create_engine
+
 from typing import List, Tuple, Optional
+
+nltk.download(['stopwords', 'wordnet', 'averaged_perceptron_tagger'])
 
 STOP_WORDS = [w for w in stopwords.words('english')]
 
 RANDOM_SEED = 42
+
+
+def parse_arguments() -> Tuple[str, str]:
+    """
+    Parse command line arguments.
+    """
+    parser = argparse.ArgumentParser(description='Disaster Response / Message classification')
+    parser.add_argument('-d', '--path-to-database', type=str)
+    parser.add_argument('-M', '--path-to-model', type=str)
+    args = parser.parse_args()
+
+    return args.path_to_database, args.path_to_model
 
 
 def load_data(path_to_database: str, table_name: Optional[str] = None) -> Tuple[pd.DataFrame, pd.DataFrame, List]:
@@ -42,7 +54,7 @@ def load_data(path_to_database: str, table_name: Optional[str] = None) -> Tuple[
     if table_name is None:
         table_name, _ = os.path.splitext(os.path.basename(path_to_database))
 
-    engine = create_engine(f'sqlite:///../{path_to_database}')
+    engine = create_engine(f'sqlite:///{path_to_database}')
     df = pd.read_sql_table(table_name, con=engine)
 
     X = df['message']
@@ -57,23 +69,19 @@ def tokenize(text):
     """
     Clean, normalize, lemmatize, and tokenize the text.
     """
-    # remove URLs
+    # normalize the text
     url_expression = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     text = re.sub(url_expression, '', text)
-
-    # remove HTML tags, non-word characters, digits, white spaces
-    for pattern in [r'<.*?>', r'\W', r'\d', r'\s+']:
-        text = re.sub(pattern, '', text)
 
     # tokenize the text
     tokens = word_tokenize(text)
 
     # remove stop words and punctuations
-    tokens = [word.strip(string.punctuation) for word in tokens if word not in STOP_WORDS]
+    tokens = [token for token in tokens if token not in STOP_WORDS]
 
-    # lemmatize and case-normalize words
+    # lemmatize tokens
     lemmatizer = WordNetLemmatizer()
-    tokens = [lemmatizer.lemmatize(token).lower() for token in tokens if token]
+    tokens = [lemmatizer.lemmatize(token) for token in tokens if token]
 
     return tokens
 
@@ -139,36 +147,6 @@ class RatioNounExtractor(BaseEstimator, TransformerMixin):
         return np.array(list(map(self.get_noun_ratio, X))).reshape(-1, 1)
 
 
-class MultiOutputClassifier(sklmc.MultiOutputClassifier):
-    """
-    Wrapper for multi-label classification.
-    """
-    def fit(self, X, y, sample_weight=None):
-        if not hasattr(self.estimator, 'fit'):
-            raise ValueError('The base estimator should implement a fit method')
-
-        X, y = check_X_y(X, y, multi_output=True, accept_sparse=True)
-
-        if is_classifier(self):
-            check_classification_targets(y)
-
-        if y.ndim == 1:
-            raise ValueError('y must have at least two dimensions for multi-output regression but has only one.')
-
-        if sample_weight is not None and not has_fit_parameter(self.estimator, 'sample_weight'):
-            raise ValueError('Underlying estimator does not support sample weights.')
-
-        self.estimators_ = Parallel(
-            n_jobs=self.n_jobs,
-            max_nbytes=None  # disable memmapping (joblib issue, crashes on n_jobs > 1)
-        )(delayed(sklmc._fit_estimator)(
-            self.estimator, X, y[:, i], sample_weight
-        ) for i in range(y.shape[1]))
-
-        self.classes_ = [estimator.classes_ for estimator in self.estimators_]
-        return self
-
-
 def build_model():
     """
     Build an NLP pipeline for multi-label text classification.
@@ -176,24 +154,31 @@ def build_model():
     # text processing and model pipeline
     pipeline = skpipe.Pipeline([
         ('nlp', skpipe.FeatureUnion([
-            ('tfif', skfet.TfidfVectorizer(tokenizer=tokenize)),
-            ('uppr', skpipe.Pipeline([('feat', RatioUpperExtractor()), ('norm', skprep.StandardScaler())])),
-            ('verb', skpipe.Pipeline([('feat', CountVerbExtractor()), ('norm', skprep.StandardScaler())])),
-            ('noun', skpipe.Pipeline([('feat', RatioNounExtractor()), ('norm', skprep.StandardScaler())]))
+            ('tfif', skpipe.Pipeline([('feat', skfet.TfidfVectorizer(strip_accents='unicode', tokenizer=tokenize)),
+                                      ('lsa', skdec.TruncatedSVD(algorithm='arpack'))])),
+            ('uppr', RatioUpperExtractor()),
+            ('verb', CountVerbExtractor()),
+            ('noun', RatioNounExtractor())
         ])),
-        ('clf', MultiOutputClassifier(
-            RandomForestClassifier(random_state=RANDOM_SEED, class_weight='balanced_subsample', n_jobs=-1)
+        ('norm', skprep.StandardScaler()),
+        ('clf', MLPClassifier(
+            activation='logistic', learning_rate='adaptive', early_stopping=True, random_state=RANDOM_SEED, verbose=1
         ))
     ])
 
     # define grid search parameters
-    params = {'clf__estimator__max_depth': [10, 20, 30], 'clf__estimator__n_estimators': [10, 20, 30]}
-
+    params = {
+        'nlp__tfif__feat__norm': ['l1', 'l2'],
+        'nlp__tfif__lsa__n_components': [100, 200],
+        'nlp__tfif__feat__ngram_range': [(1, 1), (1, 2)],
+        'clf__learning_rate_init': [1e-2, 1e-1],
+        'clf__hidden_layer_sizes': [(100,), (200,)]
+    }
     # instantiate GridSearchCV object
     cv = skms.GridSearchCV(
         estimator=pipeline,
         param_grid=params,
-        n_jobs=1,
+        n_jobs=-1,
         refit=True,
         return_train_score=True
     )
@@ -207,7 +192,7 @@ def evaluate_model(model, X_test: np.ndarray, y_test: np.ndarray, class_names: L
     """
     y_pred = model.predict(X_test)
 
-    print(skmet.classification_report(y_test, y_pred, target_names=class_names, zero_division=0))
+    print(classification_report(y_test, y_pred, target_names=class_names, zero_division=0))
 
 
 def save_model(model, path_to_model: str) -> None:
@@ -216,18 +201,6 @@ def save_model(model, path_to_model: str) -> None:
     """
     with open(path_to_model, 'wb') as file:
         pickle.dump(model, file)
-
-
-def parse_arguments() -> Tuple[str, str]:
-    """
-    Parse command line arguments.
-    """
-    parser = argparse.ArgumentParser(description='Disaster Response / Message classification')
-    parser.add_argument('--path-to-database', type=str, default='data/disaster_responses.db')
-    parser.add_argument('--path-to-model', type=str, default='classifier.pkl')
-    args = parser.parse_args()
-
-    return args.path_to_database, args.path_to_model
 
 
 def main():

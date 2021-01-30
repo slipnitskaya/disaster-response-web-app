@@ -1,5 +1,4 @@
 import json
-import argparse
 
 import plotly
 import pandas as pd
@@ -7,40 +6,16 @@ import pandas as pd
 from flask import Flask
 from flask import render_template, request
 
-from plotly.graph_objs import Histogram
+from plotly.graph_objs import Bar, Histogram
 
 from sklearn.externals import joblib
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
 
-from model.train_classifier import load_data, tokenize, MultiOutputClassifier
+from model.train_classifier import parse_arguments, load_data, tokenize
 from model.train_classifier import RatioUpperExtractor, RatioNounExtractor, CountVerbExtractor
 
-from typing import Optional, Tuple
 
 app = Flask(__name__)
-
-
-def parse_arguments() -> Tuple[str, str, Optional[str]]:
-    """
-    Parse command line arguments.
-    """
-    parser = argparse.ArgumentParser(description='Disaster Response / Web app')
-    parser.add_argument('--path-to-database', type=str, default='data/disaster_responses.db')
-    parser.add_argument('--path-to-model', type=str, default='../model/classifier.pkl')
-    parser.add_argument('--table-name', type=str, required=False)
-    args = parser.parse_args()
-
-    return args.path_to_database, args.path_to_model, args.table_name
-
-
-path_to_database, path_to_model, table_name = parse_arguments()
-
-# load data
-X, y, class_names = load_data(path_to_database)
-df = pd.concat([X, y], axis=1)
-
-# load model
-model = joblib.load(path_to_model)
 
 
 @app.route('/')
@@ -49,29 +24,18 @@ def index():
     """
     Display visuals and receive user input text for model.
     """
-    # extract data
+    # extract statistics
     messages_per_cat = y.sum(axis=0)
     cats_per_message = y.sum(axis=1)
+
+    messages_per_cat = messages_per_cat.sort_values(ascending=False)
+    categories, counts = zip(*messages_per_cat.to_dict().items())
 
     # create visuals
     graphs = [
         {
             'data': [
-                Histogram(x=cats_per_message)
-            ],
-            'layout': {
-                'title': 'Number of Categories per Message',
-                'yaxis': {
-                    'title': "Count"
-                },
-                'xaxis': {
-                    'title': "Number of Categories"
-                }
-            },
-        },
-        {
-            'data': [
-                    Histogram(x=messages_per_cat)
+                Bar(x=categories, y=counts)
             ],
             'layout': {
                 'title': 'Number of Messages per Category',
@@ -79,14 +43,28 @@ def index():
                     'title': "Count"
                 },
                 'xaxis': {
-                    'title': "Number of Messages"
+                    'title': "Categories"
+                }
+            }
+        },
+        {
+            'data': [
+                Histogram(x=cats_per_message)
+            ],
+            'layout': {
+                'title': 'Number of Categories per Message',
+                'yaxis': {
+                    'title': 'Count'
+                },
+                'xaxis': {
+                    'title': 'Number of Categories'
                 }
             }
         }
     ]
 
     # encode graphs in JSON
-    ids = ["graph-{}".format(i) for i, _ in enumerate(graphs)]
+    ids = ['graph-{}'.format(i) for i, _ in enumerate(graphs)]
     graphJSON = json.dumps(graphs, cls=plotly.utils.PlotlyJSONEncoder)
 
     # render web page with graphs
@@ -118,4 +96,13 @@ def main():
 
 
 if __name__ == '__main__':
+    path_to_database, path_to_model = parse_arguments()
+
+    # load data
+    X, y, class_names = load_data(path_to_database)
+    df = pd.concat([X, y], axis=1)
+
+    # load model
+    model = joblib.load(path_to_model)
+
     main()

@@ -155,7 +155,7 @@ def build_model():
     pipeline = skpipe.Pipeline([
         ('nlp', skpipe.FeatureUnion([
             ('tfif', skpipe.Pipeline([('feat', skfet.TfidfVectorizer(strip_accents='unicode', tokenizer=tokenize)),
-                                      ('lsa', skdec.TruncatedSVD(algorithm='arpack'))])),
+                                      ('lsa', skdec.TruncatedSVD(n_components=200, algorithm='arpack'))])),
             ('uppr', RatioUpperExtractor()),
             ('verb', CountVerbExtractor()),
             ('noun', RatioNounExtractor())
@@ -168,11 +168,8 @@ def build_model():
 
     # define grid search parameters
     params = {
-        'nlp__tfif__feat__norm': ['l1', 'l2'],
-        'nlp__tfif__lsa__n_components': [100, 200],
-        'nlp__tfif__feat__ngram_range': [(1, 1), (1, 2)],
-        'clf__learning_rate_init': [1e-2, 1e-1],
-        'clf__hidden_layer_sizes': [(100,), (200,)]
+        'clf__learning_rate_init': [5e-3, 7.5e-3, 1e-2],
+        'clf__hidden_layer_sizes': [(100), (200,), (300,)]
     }
     # instantiate GridSearchCV object
     cv = skms.GridSearchCV(

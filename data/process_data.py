@@ -66,7 +66,7 @@ def save_data(df: pd.DataFrame, path_to_database: str = 'disaster_responses.db',
         table_name, _ = os.path.splitext(os.path.basename(path_to_database))
 
     engine = create_engine(f'sqlite:///{path_to_database}')
-    df.to_sql(table_name, engine, index=False)
+    df.to_sql(table_name, engine, index=False, if_exists='replace')
 
 
 def parse_arguments() -> Tuple[str, str, str]:

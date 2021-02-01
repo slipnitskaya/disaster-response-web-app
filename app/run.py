@@ -1,3 +1,5 @@
+import os
+import sys
 import json
 
 import plotly
@@ -10,6 +12,9 @@ from plotly.graph_objs import Bar, Histogram
 
 from sklearn.externals import joblib
 from sklearn.neural_network import MLPClassifier
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+sys.path.append(os.path.abspath('..'))
 
 from model.train_classifier import parse_arguments, load_data, tokenize
 from model.train_classifier import RatioUpperExtractor, RatioNounExtractor, CountVerbExtractor
